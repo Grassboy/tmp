@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset='UTF-8'>
+<link rel="canonical" href="http://codepen.io/anon/pen/EjwEMK" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=0">
+
+
+<style class="cp-pen-styles">
+body, html {
+  margin:0;padding:0;
+  background: black;
+  color: white;
+}
+h1 {
+  background-image: linear-gradient(0deg, #444, #000 30%);
+  padding: 20px;
+}
+textarea{
+  width: 99%;
+  display: block;
+  margin: 1%;  
+  box-sizing: border-box;
+  min-height: 200px;
+}
+button {
+  width: 100%;
+  color: balck;
+}
+</style></head><body>
+<h1>MoPTT 空白文產生器</h1>
+<ol>
+  <li>把您想要發表的文章，貼到下方的文字方塊裡</li>
+  <li>按下產生「MoPTT 空白文」按鈕後，就會自動產生 MoPTT 的空白文</li>
+</ol>
+<button>產生 MoPTT 空白文</button>
+<textarea></textarea>
+
+<script src='//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.3/jquery.min.js'></script>
+<script>
+var prefix = 'Sent from JPTT on ';
+var toJPTT = function (str) {
+    var sum = 0;
+    result = [], prev_nl = 0;
+    for (var i = 0, n = str.length; i < n; ++i) {
+        sum += str.charCodeAt(i) > 255 ? 2 : 1;
+        if (sum >= 78 - prefix.length) {
+            result.push(prefix + str.substr(prev_nl, i - prev_nl));
+            sum = 0;
+            prev_nl = i;
+        }
+    }
+    result.push(prefix + str.substr(prev_nl, i - prev_nl));
+    return result.join('\n');
+};
+$('button').click(function () {
+    var value = $('textarea').val();
+    lines = value.split('\n');
+    for (var i = 0, n = lines.length; i < n; ++i) {
+        lines[i] = toJPTT(lines[i]);
+    }
+    $('textarea').val(lines.join('\n'));
+});
+//@ sourceURL=pen.js
+</script>
+</body></html>
+
