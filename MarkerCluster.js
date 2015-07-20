@@ -5,7 +5,7 @@
 
 /**
  * @name MarkerClusterer for Google Maps v3
- * @version version 1.0
+ * @version version 1.0.1
  * @author Luke Mahe
  * @fileoverview
  * The library creates and manages per-zoom-level clusters for large amounts of
@@ -161,7 +161,12 @@ function MarkerClusterer(map, opt_markers, opt_options) {
   // Add the map event listeners
   var that = this;
   google.maps.event.addListener(this.map_, 'zoom_changed', function() {
+    // Determines map type and prevent illegal zoom levels
     var zoom = that.map_.getZoom();
+    var minZoom = that.map_.minZoom || 0;
+    var maxZoom = Math.min(that.map_.maxZoom || 100,
+                         that.map_.mapTypes[that.map_.getMapTypeId()].maxZoom);
+    zoom = Math.min(Math.max(zoom,minZoom),maxZoom);
 
     if (that.prevZoom_ != zoom) {
       that.prevZoom_ = zoom;
@@ -172,9 +177,40 @@ function MarkerClusterer(map, opt_markers, opt_options) {
   google.maps.event.addListener(this.map_, 'idle', function() {
     that.redraw();
   });
+  google.maps.event.addDomListener(this.map_.getDiv(), 'click', function(e) {
+    var target = e.target;
+    if(target.className == 'cluster-icon') {
+        target.clusterIcon_.triggerClusterClick.apply(target.clusterIcon_, []);
+        e.preventDefault();
+    }
+  });
+  var clusterOverHandler = function(e) {
+    var target = e.target;
+    if(target.className == 'cluster-icon') {
+        var that = target.clusterIcon_;
+        if(parseInt(that.text_) < 10) {
+            google.maps.event.trigger(that.cluster_.markerClusterer_, 'clusterover', that.cluster_);
+        }
+        e.preventDefault();
+    }
+  };
+  var clusterOutHandler = function(e) {
+    var target = e.target;
+    if(target.className == 'cluster-icon') {
+        var that = target.clusterIcon_;
+        if(parseInt(that.text_) < 10) {
+            google.maps.event.trigger(that.cluster_.markerClusterer_, 'clusterout', that.cluster_);
+        }
+        e.preventDefault();
+    }
+  };
+  google.maps.event.addDomListener(this.map_.getDiv(), 'mouseover', clusterOverHandler);
+  google.maps.event.addDomListener(this.map_.getDiv(), 'touchstart', clusterOverHandler);
+  google.maps.event.addDomListener(this.map_.getDiv(), 'mouseout', clusterOutHandler);
+  google.maps.event.addDomListener(this.map_.getDiv(), 'touchend', clusterOutHandler);
 
   // Finally, add the markers
-  if (opt_markers && opt_markers.length) {
+  if (opt_markers && (opt_markers.length || Object.keys(opt_markers).length)) {
     this.addMarkers(opt_markers, false);
   }
 }
@@ -187,7 +223,7 @@ function MarkerClusterer(map, opt_markers, opt_options) {
  * @private
  */
 MarkerClusterer.prototype.MARKER_CLUSTER_IMAGE_PATH_ =
-    'http://google-maps-utility-library-v3.googlecode.com/svn/trunk/markerclusterer/' +
+    'https://google-maps-utility-library-v3.googlecode.com/svn/trunk/markerclusterer/' +
     'images/m';
 
 
@@ -399,8 +435,14 @@ MarkerClusterer.prototype.getCalculator = function() {
  * @param {boolean=} opt_nodraw Whether to redraw the clusters.
  */
 MarkerClusterer.prototype.addMarkers = function(markers, opt_nodraw) {
-  for (var i = 0, marker; marker = markers[i]; i++) {
-    this.pushMarkerTo_(marker);
+  if (markers.length) {
+    for (var i = 0, marker; marker = markers[i]; i++) {
+      this.pushMarkerTo_(marker);
+    }
+  } else if (Object.keys(markers).length) {
+    for (var marker in markers) {
+      this.pushMarkerTo_(markers[marker]);
+    }
   }
   if (!opt_nodraw) {
     this.redraw();
@@ -1049,8 +1091,45 @@ ClusterIcon.prototype.triggerClusterClick = function() {
   google.maps.event.trigger(markerClusterer, 'clusterclick', this.cluster_);
 
   if (markerClusterer.isZoomOnClick()) {
-    // Zoom into the cluster.
-    this.map_.fitBounds(this.cluster_.getBounds());
+    var getBoundsZoomLevel = function (bounds, mapDim) {
+        var WORLD_DIM = { height: 256, width: 256 };
+        var ZOOM_MAX = 21;
+
+        function latRad(lat) {
+            var sin = Math.sin(lat * Math.PI / 180);
+            var radX2 = Math.log((1 + sin) / (1 - sin)) / 2;
+            return Math.max(Math.min(radX2, Math.PI), -Math.PI) / 2;
+        }
+
+        function zoom(mapPx, worldPx, fraction) {
+            return Math.floor(Math.log(mapPx / worldPx / fraction) / Math.LN2);
+        }
+
+        var ne = bounds.getNorthEast();
+        var sw = bounds.getSouthWest();
+
+        var latFraction = (latRad(ne.lat()) - latRad(sw.lat())) / Math.PI;
+
+        var lngDiff = ne.lng() - sw.lng();
+        var lngFraction = ((lngDiff < 0) ? (lngDiff + 360) : lngDiff) / 360;
+
+        var latZoom = zoom(mapDim.height, WORLD_DIM.height, latFraction);
+        var lngZoom = zoom(mapDim.width, WORLD_DIM.width, lngFraction);
+
+        return Math.min(latZoom, lngZoom, ZOOM_MAX);
+    }
+    var predict_zoom = (getBoundsZoomLevel(this.cluster_.getBounds(), {
+        width: parseFloat(getComputedStyle(this.map_.getDiv()).width),
+        height: parseFloat(getComputedStyle(this.map_.getDiv()).height)
+    }));
+    var maxZoom = this.cluster_.markerClusterer_.maxZoom_;
+    if(predict_zoom > maxZoom && this.map_.getZoom() < maxZoom) {
+        this.map_.setCenter(this.cluster_.getBounds().getCenter());
+        this.map_.setZoom(maxZoom+1);
+    } else {
+        // Zoom into the cluster.
+        this.map_.fitBounds(this.cluster_.getBounds());
+    }
   }
 };
 
@@ -1061,6 +1140,7 @@ ClusterIcon.prototype.triggerClusterClick = function() {
  */
 ClusterIcon.prototype.onAdd = function() {
   this.div_ = document.createElement('DIV');
+  this.div_.className = 'cluster-icon';
   if (this.visible_) {
     var pos = this.getPosFromLatLng_(this.center_);
     this.div_.style.cssText = this.createCss(pos);
@@ -1069,11 +1149,7 @@ ClusterIcon.prototype.onAdd = function() {
 
   var panes = this.getPanes();
   panes.overlayMouseTarget.appendChild(this.div_);
-
-  var that = this;
-  google.maps.event.addDomListener(this.div_, 'click', function() {
-    that.triggerClusterClick();
-  });
+  this.div_.clusterIcon_ = this;
 };
 
 
@@ -1288,4 +1364,13 @@ Cluster.prototype['getMarkers'] = Cluster.prototype.getMarkers;
 ClusterIcon.prototype['onAdd'] = ClusterIcon.prototype.onAdd;
 ClusterIcon.prototype['draw'] = ClusterIcon.prototype.draw;
 ClusterIcon.prototype['onRemove'] = ClusterIcon.prototype.onRemove;
+
+Object.keys = Object.keys || function(o) {
+    var result = [];
+    for(var name in o) {
+        if (o.hasOwnProperty(name))
+          result.push(name);
+    }
+    return result;
+};
 
